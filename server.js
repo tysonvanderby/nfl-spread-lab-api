@@ -28,7 +28,7 @@ app.get("/odds", async (req, res) => {
 
   try {
     const response = await fetch(
-      "https://therundown.io/api/v2/sports/2/events",
+      "`https://therundown.io/api/v2/sports/2/events/${new Date().toISOString().slice(0, 10)}`",
       {
         headers: {
           "X-TheRundown-Key": API_KEY
