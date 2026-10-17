@@ -199,6 +199,76 @@ return res.json({
 });
 
 
+app.get("/consensus", async (req, res) => {
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${PORT}/odds`
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      return res.status(response.status).json(data);
+    }
+
+    const sportsbookNames = {
+      "19": "DraftKings",
+      "22": "BetMGM",
+      "23": "FanDuel"
+    };
+
+    const events = (data.events || []).map(event => {
+      function summarizeMarket(market) {
+        return (market || []).map(item => {
+          const prices = item.prices || {};
+
+          const books = Object.entries(prices)
+            .filter(([id, price]) =>
+              sportsbookNames[id] &&
+              price !== null &&
+              price !== undefined
+            )
+            .map(([id, price]) => ({
+              sportsbook: sportsbookNames[id],
+              price
+            }));
+
+          return {
+            selection: item.selection,
+            line: item.line,
+            sportsbookCount: books.length,
+            prices: books
+          };
+        });
+      }
+
+      return {
+        eventId: event.eventId,
+        date: event.date,
+        awayTeam: event.awayTeam,
+        homeTeam: event.homeTeam,
+        spread: summarizeMarket(event.spread),
+        total: summarizeMarket(event.total),
+        moneyline: summarizeMarket(event.moneyline)
+      };
+    });
+
+    return res.json({
+      source: "TheRundown",
+      date: data.date,
+      gameCount: events.length,
+      sportsbooks: Object.values(sportsbookNames),
+      events
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: "Consensus summary failed.",
+      details: error.message
+    });
+  }
+});
+
+
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`NFL Spread Lab API listening on port ${PORT}`);
 });
