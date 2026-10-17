@@ -85,7 +85,8 @@ app.get("/odds", async (req, res) => {
       affiliate_ids: "19,22,23",
       main_line: "true"
     });
-
+    
+    await new Promise(resolve => setTimeout(resolve, 1100));
     const oddsResponse = await fetch(
       `${base}/sports/${nextGameDate.sportId}/events/${date}?${params}`,
       { headers }
