@@ -1,0 +1,9 @@
+
+services:
+  - type: web
+    name: nfl-spread-lab-api
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
