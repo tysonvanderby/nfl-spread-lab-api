@@ -19,11 +19,103 @@ app.get("/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
+
 app.get("/odds", async (req, res) => {
-  if (!API_KEY) {
-    return res.status(503).json({
-      error: "Odds API key is missing from Render."
+  try {
+    if (!API_KEY) {
+      return res.status(500).json({
+        error: "Missing RUNDOWN_API_KEY environment variable."
+      });
+    }
+
+    const base = "https://therundown.io/api/v2";
+    const headers = {
+      "X-TheRundown-Key": API_KEY
+    };
+
+    // Step 1: Find upcoming NFL game dates.
+    const datesResponse = await fetch(
+      `${base}/sports/dates?sport_ids=2,25,26&format=epoch&exclude_canceled=true`,
+      { headers }
+    );
+
+    const datesData = await datesResponse.json();
+
+    if (!datesResponse.ok) {
+      return res.status(datesResponse.status).json({
+        error: "Failed to retrieve NFL game dates.",
+        details: datesData
+      });
+    }
+
+    const now = Date.now() / 1000;
+    const upcoming = [];
+
+    for (const sportId of ["2", "25", "26"]) {
+      const dates = datesData[sportId]?.dates || [];
+
+      for (const stamp of dates) {
+        if (Number(stamp) > now) {
+          upcoming.push({
+            sportId,
+            stamp: Number(stamp)
+          });
+        }
+      }
+    }
+
+    upcoming.sort((a, b) => a.stamp - b.stamp);
+
+    if (upcoming.length === 0) {
+      return res.json({
+        source: "TheRundown",
+        events: [],
+        note: "No upcoming NFL game dates were returned."
+      });
+    }
+
+    const nextGameDate = upcoming[0];
+    const date = new Date(
+      nextGameDate.stamp * 1000
+    ).toISOString().slice(0, 10);
+
+    // Step 2: Retrieve Vegas lines for the next game date.
+    const params = new URLSearchParams({
+      market_ids: "1,2,3",
+      affiliate_ids: "19,22,23",
+      main_line: "true"
     });
+
+    const oddsResponse = await fetch(
+      `${base}/sports/${nextGameDate.sportId}/events/${date}?${params}`,
+      { headers }
+    );
+
+    const oddsData = await oddsResponse.json();
+
+    if (!oddsResponse.ok) {
+      return res.status(oddsResponse.status).json({
+        error: "Failed to retrieve NFL odds.",
+        date,
+        details: oddsData
+      });
+    }
+
+    return res.json({
+      source: "TheRundown",
+      date,
+      events: oddsData.events || [],
+      note: "Verify returned markets and game dates before use."
+    });
+
+  } catch (error) {
+    return res.status(500).json({
+      error: "Failed to fetch NFL odds.",
+      details: error.message
+    });
+  }
+});
+
   }
 
   try {
