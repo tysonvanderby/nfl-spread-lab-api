@@ -144,12 +144,51 @@ return res.json({
       });
     }
 
-    return res.json({
-      source: "TheRundown",
-      date,
-      events: oddsData.events || [],
-      note: "Verify returned markets and game dates before use."
+    const cleanEvents = (oddsData.events || []).map(event => {
+  const teams = event.teams || [];
+  const markets = event.markets || [];
+
+  function getMarket(name) {
+    const market = markets.find(m => m.name === name);
+    if (!market) return [];
+
+    return (market.participants || []).map(participant => {
+      const line = participant.lines?.[0];
+
+      return {
+        selection: participant.name,
+        line: line?.value ?? null,
+        prices: line?.prices
+          ? Object.fromEntries(
+              Object.entries(line.prices).map(([book, data]) => [
+                book,
+                data.price
+              ])
+            )
+          : {}
+      };
     });
+  }
+
+  return {
+    eventId: event.event_id,
+    date: event.event_date,
+    awayTeam: teams.find(t => t.is_away)?.name,
+    homeTeam: teams.find(t => t.is_home)?.name,
+    awayAbbreviation: teams.find(t => t.is_away)?.abbreviation,
+    homeAbbreviation: teams.find(t => t.is_home)?.abbreviation,
+    spread: getMarket("handicap"),
+    total: getMarket("totals"),
+    moneyline: getMarket("moneyline")
+  };
+});
+
+return res.json({
+  source: "TheRundown",
+  date,
+  count: cleanEvents.length,
+  events: cleanEvents
+});
 
   } catch (error) {
     return res.status(500).json({
