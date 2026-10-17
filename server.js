@@ -53,7 +53,7 @@ app.get("/odds", async (req, res) => {
       note: "Verify returned markets and game dates before use."
     });
   } catch (error) {
-    console.error("Odds request failed:", error.name);
+    console.error("Odds request failed:", error);
     res.status(502).json({
       error: "Unable to retrieve odds right now."
     });
