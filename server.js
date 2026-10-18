@@ -19,6 +19,44 @@ app.get("/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
+function cleanEvent(event) {
+  const teams = event.teams || [];
+  const markets = event.markets || [];
+
+  function getMarket(name) {
+    const market = markets.find(m => m.name === name);
+    if (!market) return [];
+
+    return (market.participants || []).map(participant => {
+      const line = participant.lines?.[0];
+
+      return {
+        selection: participant.name,
+        line: line?.value ?? null,
+        prices: line?.prices
+          ? Object.fromEntries(
+              Object.entries(line.prices).map(([book, data]) => [
+                book,
+                data.price
+              ])
+            )
+          : {}
+      };
+    });
+  }
+
+  return {
+    eventId: event.event_id,
+    date: event.event_date,
+    awayTeam: teams.find(t => t.is_away)?.name,
+    homeTeam: teams.find(t => t.is_home)?.name,
+    awayAbbreviation: teams.find(t => t.is_away)?.abbreviation,
+    homeAbbreviation: teams.find(t => t.is_home)?.abbreviation,
+    spread: getMarket("handicap"),
+    total: getMarket("totals"),
+    moneyline: getMarket("moneyline")
+  };
+}
 
 app.get("/odds", async (req, res) => {
   try {
@@ -29,13 +67,10 @@ app.get("/odds", async (req, res) => {
     }
 
     const base = "https://therundown.io/api/v2";
-    const headers = {
-      "X-TheRundown-Key": API_KEY
-    };
+    const headers = { "X-TheRundown-Key": API_KEY };
 
-    // Step 1: Find upcoming NFL game dates.
     const datesResponse = await fetch(
-      `${base}/sports/dates?sport_ids=2,25,26&format=epoch&exclude_canceled=true`,
+      `${base}/sports/dates?sport_ids=2&format=epoch&exclude_canceled=true`,
       { headers }
     );
 
@@ -48,148 +83,74 @@ app.get("/odds", async (req, res) => {
       });
     }
 
-    const now = Date.now() / 1000;
-    const upcoming = [];
+    const today = new Date().toISOString().slice(0, 10);
+    const endDate = new Date(Date.now() + 7 * 86400000)
+      .toISOString()
+      .slice(0, 10);
 
-    for (const sportId of ["2", "25", "26"]) {
-      const dates = datesData[sportId]?.dates || [];
+    const dates = [...new Set(
+      (datesData["2"]?.dates || [])
+        .map(stamp =>
+          new Date(Number(stamp) * 1000).toISOString().slice(0, 10)
+        )
+        .filter(date => date >= today && date <= endDate)
+    )].sort();
 
-      for (const stamp of dates) {
-        if (Number(stamp) > now) {
-          upcoming.push({
-            sportId,
-            stamp: Number(stamp)
-          });
-        }
-      }
+    if (dates.length === 0) {
+      return res.json({
+        source: "TheRundown",
+        date: today,
+        datesQueried: [],
+        count: 0,
+        events: []
+      });
     }
 
-    upcoming.sort((a, b) => a.stamp - b.stamp);
-
-    if (upcoming.length === 0) {
-      
-const cleanEvents = (oddsData.events || []).map(event => {
-  const teams = event.teams || [];
-  const markets = event.markets || [];
-
-  function getMarket(name) {
-    const market = markets.find(m => m.name === name);
-    if (!market) return [];
-
-    return (market.participants || []).map(participant => {
-      const line = participant.lines?.[0];
-
-      return {
-        selection: participant.name,
-        line: line?.value ?? null,
-        prices: line?.prices
-          ? Object.fromEntries(
-              Object.entries(line.prices).map(([book, data]) => [
-                book,
-                data.price
-              ])
-            )
-          : {}
-      };
-    });
-  }
-
-  return {
-    eventId: event.event_id,
-    date: event.event_date,
-    awayTeam: teams.find(t => t.is_away)?.name,
-    homeTeam: teams.find(t => t.is_home)?.name,
-    awayAbbreviation: teams.find(t => t.is_away)?.abbreviation,
-    homeAbbreviation: teams.find(t => t.is_home)?.abbreviation,
-    spread: getMarket("handicap"),
-    total: getMarket("totals"),
-    moneyline: getMarket("moneyline")
-  };
-});
-
-return res.json({
-  source: "TheRundown",
-  date,
-  count: cleanEvents.length,
-  events: cleanEvents
-});
-
-    }
-
-    const nextGameDate = upcoming[0];
-    const date = new Date(
-      nextGameDate.stamp * 1000
-    ).toISOString().slice(0, 10);
-
-    // Step 2: Retrieve Vegas lines for the next game date.
     const params = new URLSearchParams({
       market_ids: "1,2,3",
       affiliate_ids: "19,22,23",
       main_line: "true"
     });
-    
-    await new Promise(resolve => setTimeout(resolve, 1100));
-    const oddsResponse = await fetch(
-      `${base}/sports/${nextGameDate.sportId}/events/${date}?${params}`,
-      { headers }
-    );
 
-    const oddsData = await oddsResponse.json();
+    const allEvents = [];
+    const errors = [];
 
-    if (!oddsResponse.ok) {
-      return res.status(oddsResponse.status).json({
-        error: "Failed to retrieve NFL odds.",
-        date,
-        details: oddsData
-      });
+    for (const date of dates) {
+      await new Promise(resolve => setTimeout(resolve, 1100));
+
+      const response = await fetch(
+        `${base}/sports/2/events/${date}?${params}`,
+        { headers }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        errors.push({
+          date,
+          status: response.status,
+          details: data
+        });
+        continue;
+      }
+
+      allEvents.push(...(data.events || []));
     }
 
-    const cleanEvents = (oddsData.events || []).map(event => {
-  const teams = event.teams || [];
-  const markets = event.markets || [];
+    const uniqueEvents = [
+      ...new Map(
+        allEvents.map(event => [event.event_id, event])
+      ).values()
+    ];
 
-  function getMarket(name) {
-    const market = markets.find(m => m.name === name);
-    if (!market) return [];
-
-    return (market.participants || []).map(participant => {
-      const line = participant.lines?.[0];
-
-      return {
-        selection: participant.name,
-        line: line?.value ?? null,
-        prices: line?.prices
-          ? Object.fromEntries(
-              Object.entries(line.prices).map(([book, data]) => [
-                book,
-                data.price
-              ])
-            )
-          : {}
-      };
+    return res.json({
+      source: "TheRundown",
+      date: today,
+      datesQueried: dates,
+      count: uniqueEvents.length,
+      events: uniqueEvents.map(cleanEvent),
+      ...(errors.length ? { warnings: errors } : {})
     });
-  }
-
-  return {
-    eventId: event.event_id,
-    date: event.event_date,
-    awayTeam: teams.find(t => t.is_away)?.name,
-    homeTeam: teams.find(t => t.is_home)?.name,
-    awayAbbreviation: teams.find(t => t.is_away)?.abbreviation,
-    homeAbbreviation: teams.find(t => t.is_home)?.abbreviation,
-    spread: getMarket("handicap"),
-    total: getMarket("totals"),
-    moneyline: getMarket("moneyline")
-  };
-});
-
-return res.json({
-  source: "TheRundown",
-  date,
-  count: cleanEvents.length,
-  events: cleanEvents
-});
-
   } catch (error) {
     return res.status(500).json({
       error: "Failed to fetch NFL odds.",
@@ -197,7 +158,6 @@ return res.json({
     });
   }
 });
-
 
 app.get("/consensus", async (req, res) => {
   try {
@@ -256,9 +216,11 @@ app.get("/consensus", async (req, res) => {
     return res.json({
       source: "TheRundown",
       date: data.date,
+      datesQueried: data.datesQueried || [],
       gameCount: events.length,
       sportsbooks: Object.values(sportsbookNames),
-      events
+      events,
+      ...(data.warnings ? { warnings: data.warnings } : {})
     });
   } catch (error) {
     return res.status(500).json({
@@ -267,7 +229,6 @@ app.get("/consensus", async (req, res) => {
     });
   }
 });
-
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`NFL Spread Lab API listening on port ${PORT}`);
