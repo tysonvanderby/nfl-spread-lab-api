@@ -7,7 +7,12 @@ const { Pool } = pg;
 const app = express();
 const PORT = process.env.PORT || 3000;
 const API_KEY = process.env.RUNDOWN_API_KEY;
-
+console.log(
+  "DATABASE_URL check:",
+  process.env.DATABASE_URL
+    ? new URL(process.env.DATABASE_URL).hostname
+    : "MISSING"
+);
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.DATABASE_URL
