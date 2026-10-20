@@ -240,6 +240,38 @@ app.get("/consensus", async (req, res) => {
   }
 });
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`NFL Spread Lab API listening on port ${PORT}`);
-});
+async function startServer() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS best_bets (
+        id BIGSERIAL PRIMARY KEY,
+        event_id TEXT NOT NULL,
+        game_date TIMESTAMPTZ,
+        away_team TEXT NOT NULL,
+        home_team TEXT NOT NULL,
+        market TEXT NOT NULL,
+        selection TEXT NOT NULL,
+        line NUMERIC,
+        odds INTEGER NOT NULL DEFAULT -110,
+        model_edge NUMERIC,
+        status TEXT NOT NULL DEFAULT 'pending',
+        result TEXT,
+        units NUMERIC,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        graded_at TIMESTAMPTZ
+      );
+    `);
+
+    console.log("Best Bets database table ready.");
+
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`NFL Spread Lab API listening on port ${PORT}`);
+    });
+  } catch (error) {
+    console.error("Database initialization failed:", error);
+    process.exit(1);
+  }
+}
+
+startServer();
+
