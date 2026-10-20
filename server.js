@@ -245,6 +245,330 @@ app.get("/consensus", async (req, res) => {
   }
 });
 
+app.get("/best-bets", async (req, res) => {
+  try {
+    const status = req.query.status;
+
+    if (status && !["pending", "graded"].includes(status)) {
+      return res.status(400).json({
+        error: "status must be pending or graded."
+      });
+    }
+
+    let query = `
+      SELECT
+        id,
+        event_id AS "eventId",
+        game_date AS date,
+        away_team AS "awayTeam",
+        home_team AS "homeTeam",
+        market,
+        selection,
+        line,
+        odds,
+        model_edge AS "modelEdge",
+        status,
+        result,
+        units,
+        created_at AS "createdAt",
+        graded_at AS "gradedAt"
+      FROM best_bets
+    `;
+
+    if (status) {
+      query += " WHERE status = $1";
+    }
+
+    query += " ORDER BY game_date ASC NULLS LAST, created_at DESC";
+
+    const result = status
+      ? await pool.query(query, [status])
+      : await pool.query(query);
+
+    return res.json({
+      count: result.rows.length,
+      bets: result.rows
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: "Failed to retrieve Best Bets.",
+      details: error.message
+    });
+  }
+});
+
+
+app.post("/best-bets/generate", async (req, res) => {
+  try {
+    const picks = req.body?.picks;
+
+    if (!Array.isArray(picks)) {
+      return res.status(400).json({
+        error: "Request must contain a picks array."
+      });
+    }
+
+    const created = [];
+    const skipped = [];
+
+    for (const pick of picks) {
+      const edge = Number(pick.modelEdge);
+
+      if (!Number.isFinite(edge) || Math.abs(edge) < 2) {
+        skipped.push({
+          eventId: pick.eventId ?? null,
+          reason: "Model edge is below 2 points."
+        });
+        continue;
+      }
+
+      const required = [
+        "eventId",
+        "awayTeam",
+        "homeTeam",
+        "market",
+        "selection"
+      ];
+
+      const missing = required.filter(
+        key => !String(pick[key] ?? "").trim()
+      );
+
+      if (missing.length) {
+        skipped.push({
+          eventId: pick.eventId ?? null,
+          reason: "Missing fields: " + missing.join(", ")
+        });
+        continue;
+      }
+
+      const line =
+        pick.line === null ||
+        pick.line === undefined ||
+        pick.line === ""
+          ? null
+          : Number(pick.line);
+
+      if (line !== null && !Number.isFinite(line)) {
+        skipped.push({
+          eventId: pick.eventId,
+          reason: "Invalid betting line."
+        });
+        continue;
+      }
+
+      const duplicate = await pool.query(
+        `SELECT id FROM best_bets
+         WHERE event_id = $1
+           AND market = $2
+           AND selection = $3
+           AND line IS NOT DISTINCT FROM $4
+         LIMIT 1`,
+        [
+          String(pick.eventId),
+          String(pick.market),
+          String(pick.selection),
+          line
+        ]
+      );
+
+      if (duplicate.rows.length) {
+        skipped.push({
+          eventId: pick.eventId,
+          reason: "This pick already exists."
+        });
+        continue;
+      }
+
+      const gameDate = pick.date ? new Date(pick.date) : null;
+
+      if (gameDate && Number.isNaN(gameDate.getTime())) {
+        skipped.push({
+          eventId: pick.eventId,
+          reason: "Invalid game date."
+        });
+        continue;
+      }
+
+      const rawOdds = Number(pick.odds);
+      const odds = Number.isInteger(rawOdds) && rawOdds !== 0
+        ? rawOdds
+        : -110;
+
+      const saved = await pool.query(
+        `INSERT INTO best_bets
+          (event_id, game_date, away_team, home_team,
+           market, selection, line, odds, model_edge)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         RETURNING id, event_id AS "eventId",
+                   away_team AS "awayTeam",
+                   home_team AS "homeTeam",
+                   market, selection, line, odds,
+                   model_edge AS "modelEdge", status`,
+        [
+          String(pick.eventId),
+          gameDate,
+          String(pick.awayTeam),
+          String(pick.homeTeam),
+          String(pick.market),
+          String(pick.selection),
+          line,
+          odds,
+          edge
+        ]
+      );
+
+      created.push(saved.rows[0]);
+    }
+
+    return res.json({
+      createdCount: created.length,
+      skippedCount: skipped.length,
+      created,
+      skipped
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: "Failed to generate Best Bets.",
+      details: error.message
+    });
+  }
+});
+
+
+app.post("/best-bets/:id/grade", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const outcome = String(req.body?.result || "").toLowerCase();
+
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({
+        error: "Invalid Best Bet ID."
+      });
+    }
+
+    if (!["win", "loss", "push"].includes(outcome)) {
+      return res.status(400).json({
+        error: "Result must be win, loss, or push."
+      });
+    }
+
+    const existing = await pool.query(
+      "SELECT id, odds, status FROM best_bets WHERE id = $1",
+      [id]
+    );
+
+    if (!existing.rows.length) {
+      return res.status(404).json({
+        error: "Best Bet not found."
+      });
+    }
+
+    if (existing.rows[0].status === "graded") {
+      return res.status(409).json({
+        error: "This Best Bet has already been graded."
+      });
+    }
+
+    const odds = Number(existing.rows[0].odds) || -110;
+
+    let units = 0;
+
+    if (outcome === "loss") {
+      units = -1;
+    } else if (outcome === "win") {
+      units = odds > 0 ? odds / 100 : 100 / Math.abs(odds);
+    }
+
+    const updated = await pool.query(
+      `UPDATE best_bets
+       SET status = 'graded',
+           result = $2,
+           units = $3,
+           graded_at = NOW()
+       WHERE id = $1
+         AND status = 'pending'
+       RETURNING id, event_id AS "eventId",
+                 away_team AS "awayTeam",
+                 home_team AS "homeTeam",
+                 market, selection, line, odds,
+                 model_edge AS "modelEdge",
+                 status, result, units,
+                 graded_at AS "gradedAt"`,
+      [id, outcome, Number(units.toFixed(4))]
+    );
+
+    if (!updated.rows.length) {
+      return res.status(409).json({
+        error: "This Best Bet has already been graded."
+      });
+    }
+
+    return res.json({
+      bet: updated.rows[0]
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: "Failed to grade Best Bet.",
+      details: error.message
+    });
+  }
+});
+
+
+app.get("/best-bets/stats", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        COUNT(*) FILTER (
+          WHERE status = 'graded'
+        )::int AS graded,
+
+        COUNT(*) FILTER (
+          WHERE result = 'win'
+        )::int AS wins,
+
+        COUNT(*) FILTER (
+          WHERE result = 'loss'
+        )::int AS losses,
+
+        COUNT(*) FILTER (
+          WHERE result = 'push'
+        )::int AS pushes,
+
+        COUNT(*) FILTER (
+          WHERE status = 'pending'
+        )::int AS pending,
+
+        COALESCE(
+          SUM(units) FILTER (WHERE status = 'graded'),
+          0
+        )::numeric(12, 4) AS units,
+
+        ROUND(
+          100.0 * COUNT(*) FILTER (WHERE result = 'win')
+          / NULLIF(
+              COUNT(*) FILTER (
+                WHERE result IN ('win', 'loss')
+              ),
+              0
+            ),
+          2
+        ) AS win_percentage
+
+      FROM best_bets
+    `);
+
+    return res.json(result.rows[0]);
+  } catch (error) {
+    return res.status(500).json({
+      error: "Failed to retrieve Best Bets stats.",
+      details: error.message
+    });
+  }
+});
+
+
 async function startServer() {
   try {
     await pool.query(`
