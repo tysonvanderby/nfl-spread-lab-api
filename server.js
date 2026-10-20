@@ -1,9 +1,19 @@
 
 import express from "express";
+import pg from "pg";
+
+const { Pool } = pg;
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const API_KEY = process.env.RUNDOWN_API_KEY;
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_URL
+    ? { rejectUnauthorized: false }
+    : false,
+});
 
 app.use(express.json());
 
