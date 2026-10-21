@@ -1,6 +1,7 @@
 
 import express from "express";
 import pg from "pg";
+import * as cheerio from "cheerio";
 
 const { Pool } = pg;
 
@@ -28,6 +29,114 @@ app.get("/", (req, res) => {
     status: "online",
     message: "Backend is running."
   });
+});
+
+const NFL_INJURY_URL = "https://amp.nfl.com/injuries/";
+
+const NFL_TEAMS = [
+  "49ers", "Bears", "Bengals", "Bills", "Broncos", "Browns",
+  "Buccaneers", "Cardinals", "Chargers", "Chiefs", "Colts",
+  "Commanders", "Cowboys", "Dolphins", "Eagles", "Falcons",
+  "Giants", "Jaguars", "Jets", "Lions", "Packers", "Panthers",
+  "Patriots", "Raiders", "Rams", "Ravens", "Saints", "Seahawks",
+  "Steelers", "Texans", "Titans", "Vikings"
+];
+
+let qbInjuryCache = {
+  timestamp: 0,
+  players: []
+};
+
+app.get("/injuries/quarterbacks", async (req, res) => {
+  try {
+    // Cache the report briefly to avoid repeatedly fetching NFL.com.
+    if (Date.now() - qbInjuryCache.timestamp < 5 * 60 * 1000) {
+      return res.json({
+        source: "NFL.com",
+        cached: true,
+        count: qbInjuryCache.players.length,
+        quarterbacks: qbInjuryCache.players
+      });
+    }
+
+    const response = await fetch(NFL_INJURY_URL, {
+      headers: {
+        "User-Agent": "NFL-Spread-Lab/1.0"
+      },
+      signal: AbortSignal.timeout(15000)
+    });
+
+    if (!response.ok) {
+      return res.status(502).json({
+        error: "NFL injury report could not be retrieved.",
+        upstreamStatus: response.status
+      });
+    }
+
+    const html = await response.text();
+    const $ = cheerio.load(html);
+    const quarterbacks = [];
+
+    $("table").each((_, table) => {
+      const heading = $(table)
+        .prevAll("h1, h2, h3, h4")
+        .first()
+        .text()
+        .trim();
+
+      const team = NFL_TEAMS.find(
+        name => name.toLowerCase() === heading.toLowerCase()
+      );
+
+      $(table).find("tr").each((_, row) => {
+        const cells = $(row)
+          .find("th, td")
+          .map((_, cell) => $(cell).text().trim())
+          .get();
+
+        if (
+          cells.length < 5 ||
+          cells[1].toUpperCase() !== "QB"
+        ) {
+          return;
+        }
+
+        quarterbacks.push({
+          team: team || null,
+          player: cells[0],
+          position: cells[1],
+          injury: cells[2] || null,
+          practiceStatus: cells[3] || null,
+          gameStatus: cells[4] || null
+        });
+      });
+    });
+
+    if (quarterbacks.length === 0) {
+      return res.status(502).json({
+        error: "No quarterback rows were found in the NFL report.",
+        message: "The report format may have changed; no empty result was cached."
+      });
+    }
+
+    qbInjuryCache = {
+      timestamp: Date.now(),
+      players: quarterbacks
+    };
+
+    return res.json({
+      source: "NFL.com",
+      cached: false,
+      updatedAt: new Date().toISOString(),
+      count: quarterbacks.length,
+      quarterbacks
+    });
+  } catch (error) {
+    return res.status(502).json({
+      error: "Failed to retrieve quarterback injuries.",
+      details: error.message
+    });
+  }
 });
 
 app.get("/health", (req, res) => {
