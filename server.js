@@ -149,8 +149,14 @@ function identifyTeam(text) {
 ].join(" ");
 
 const team = identifyTeam(tableContext);
-
-      const team = identifyTeam(tableContext);
+      console.log("QB TEAM DEBUG", {
+  heading,
+  previous: $(table).prev().text().trim(),
+  parentTag: $(table).parent().get(0)?.tagName,
+  parentText: $(table).parent().text().trim().slice(0, 120),
+  grandparentTag: $(table).parent().parent().get(0)?.tagName,
+  grandparentPrevious: $(table).parent().parent().prev().text().trim()
+});
 
       $(table).find("tr").each((_, row) => {
         const cells = $(row)
