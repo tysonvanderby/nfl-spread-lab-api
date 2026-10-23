@@ -77,13 +77,6 @@ app.get("/injuries/quarterbacks", async (req, res) => {
     const $ = cheerio.load(html);
     const quarterbacks = [];
 
-    $("table").each((_, table) => {
-      const heading = $(table)
-        .prevAll("h1, h2, h3, h4")
-        .first()
-        .text()
-        .trim();
-
       
       const heading = $(table)
         .prevAll("h1, h2, h3, h4")
