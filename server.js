@@ -114,17 +114,27 @@ app.get("/injuries/quarterbacks", async (req, res) => {
       "washington commanders": "Commanders"
     };
 
-    function identifyTeam(text) {
-      const normalized = text
-        .toLowerCase()
-        .replace(/[^a-z0-9 ]/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
+    
+function identifyTeam(text) {
+  const normalized = text
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
-      return Object.entries(teamAliases).find(
-        ([fullName]) => normalized.includes(fullName)
-      )?.[1] || null;
-    }
+  const fullNameMatch = Object.entries(teamAliases).find(
+    ([fullName]) => normalized.includes(fullName)
+  );
+
+  if (fullNameMatch) {
+    return fullNameMatch[1];
+  }
+
+  return NFL_TEAMS.find(team =>
+    normalized.split(" ").includes(team.toLowerCase())
+  ) || null;
+}
+
 
     $("table").each((_, table) => {
       const heading = $(table)
