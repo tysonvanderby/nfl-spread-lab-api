@@ -119,6 +119,7 @@ async function loadQuarterbackRoster() {
   }
 
   const players = new Map();
+  const rosterList = [];
 
   for (const line of lines.slice(1)) {
     const row = parseCsvLine(line);
@@ -129,18 +130,25 @@ async function loadQuarterbackRoster() {
     const team = NFL_TEAM_NAMES[row[teamIndex]?.toUpperCase()];
 
     if (name && team) {
-      players.set(name, team);
-    }
+  players.set(name, team);
+  rosterList.push({
+    player: row[nameIndex],
+    team,
+    position: "QB"
+  });
+}
   }
 
   if (players.size === 0) {
     throw new Error("NFL roster downloaded but no quarterbacks were found.");
   }
 
-  qbRosterCache = {
-    timestamp: Date.now(),
-    players
-  };
+  qbRosterList = rosterList;
+
+qbRosterCache = {
+  timestamp: Date.now(),
+  players
+};
 
   return players;
 }
