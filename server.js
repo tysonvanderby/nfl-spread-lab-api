@@ -33,6 +33,119 @@ app.get("/", (req, res) => {
 
 const NFL_INJURY_URL = "https://amp.nfl.com/injuries/";
 
+
+const NFL_ROSTER_URL = (season) =>
+  `https://github.com/nflverse/nflverse-data/releases/download/rosters/roster_${season}.csv`;
+
+const NFL_TEAM_NAMES = {
+  ARI: "Cardinals", ATL: "Falcons", BAL: "Ravens",
+  BUF: "Bills", CAR: "Panthers", CHI: "Bears",
+  CIN: "Bengals", CLE: "Browns", DAL: "Cowboys",
+  DEN: "Broncos", DET: "Lions", GB: "Packers",
+  HOU: "Texans", IND: "Colts", JAX: "Jaguars",
+  JAC: "Jaguars", KC: "Chiefs", LV: "Raiders",
+  LAC: "Chargers", LA: "Rams", LAR: "Rams",
+  MIA: "Dolphins", MIN: "Vikings", NE: "Patriots",
+  NO: "Saints", NYG: "Giants", NYJ: "Jets",
+  PHI: "Eagles", PIT: "Steelers", SF: "49ers",
+  SEA: "Seahawks", TB: "Buccaneers", TEN: "Titans",
+  WAS: "Commanders"
+};
+
+let qbRosterCache = {
+  timestamp: 0,
+  players: new Map()
+};
+
+function parseCsvLine(line) {
+  const values = [];
+  let value = "";
+  let quoted = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+
+    if (char === '"' && quoted && line[i + 1] === '"') {
+      value += '"';
+      i++;
+    } else if (char === '"') {
+      quoted = !quoted;
+    } else if (char === "," && !quoted) {
+      values.push(value);
+      value = "";
+    } else {
+      value += char;
+    }
+  }
+
+  values.push(value);
+  return values;
+}
+
+function normalizePlayerName(name) {
+  return String(name || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+async function loadQuarterbackRoster() {
+  if (
+    qbRosterCache.players.size > 0 &&
+    Date.now() - qbRosterCache.timestamp < 24 * 60 * 60 * 1000
+  ) {
+    return qbRosterCache.players;
+  }
+
+  const season = new Date().getFullYear();
+  const response = await fetch(NFL_ROSTER_URL(season), {
+    signal: AbortSignal.timeout(20000)
+  });
+
+  if (!response.ok) {
+    throw new Error(`NFL roster download failed: ${response.status}`);
+  }
+
+  const csv = await response.text();
+  const lines = csv.trim().split(/\r?\n/);
+  const headers = parseCsvLine(lines[0]);
+  const nameIndex = headers.indexOf("full_name");
+  const teamIndex = headers.indexOf("team");
+  const positionIndex = headers.indexOf("position");
+
+  if (nameIndex < 0 || teamIndex < 0 || positionIndex < 0) {
+    throw new Error("NFL roster CSV is missing required columns.");
+  }
+
+  const players = new Map();
+
+  for (const line of lines.slice(1)) {
+    const row = parseCsvLine(line);
+
+    if (row[positionIndex]?.toUpperCase() !== "QB") continue;
+
+    const name = normalizePlayerName(row[nameIndex]);
+    const team = NFL_TEAM_NAMES[row[teamIndex]?.toUpperCase()];
+
+    if (name && team) {
+      players.set(name, team);
+    }
+  }
+
+  if (players.size === 0) {
+    throw new Error("NFL roster downloaded but no quarterbacks were found.");
+  }
+
+  qbRosterCache = {
+    timestamp: Date.now(),
+    players
+  };
+
+  return players;
+}
+
+
 const NFL_TEAMS = [
   "49ers", "Bears", "Bengals", "Bills", "Broncos", "Browns",
   "Buccaneers", "Cardinals", "Chargers", "Chiefs", "Colts",
