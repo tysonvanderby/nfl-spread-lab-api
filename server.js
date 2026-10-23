@@ -47,9 +47,11 @@ let qbInjuryCache = {
   players: []
 };
 
+
+
 app.get("/injuries/quarterbacks", async (req, res) => {
   try {
-    // Cache the report briefly to avoid repeatedly fetching NFL.com.
+    // Return the cached report for five minutes.
     if (Date.now() - qbInjuryCache.timestamp < 5 * 60 * 1000) {
       return res.json({
         source: "NFL.com",
@@ -61,7 +63,7 @@ app.get("/injuries/quarterbacks", async (req, res) => {
 
     const response = await fetch(NFL_INJURY_URL, {
       headers: {
-        "User-Agent": "NFL-Spread-Lab/1.0"
+        "User-Agent": "Mozilla/5.0 NFL-Spread-Lab/1.0"
       },
       signal: AbortSignal.timeout(15000)
     });
@@ -77,57 +79,67 @@ app.get("/injuries/quarterbacks", async (req, res) => {
     const $ = cheerio.load(html);
     const quarterbacks = [];
 
-      
+    const teamAliases = {
+      "arizona cardinals": "Cardinals",
+      "atlanta falcons": "Falcons",
+      "baltimore ravens": "Ravens",
+      "buffalo bills": "Bills",
+      "carolina panthers": "Panthers",
+      "chicago bears": "Bears",
+      "cincinnati bengals": "Bengals",
+      "cleveland browns": "Browns",
+      "dallas cowboys": "Cowboys",
+      "denver broncos": "Broncos",
+      "detroit lions": "Lions",
+      "green bay packers": "Packers",
+      "houston texans": "Texans",
+      "indianapolis colts": "Colts",
+      "jacksonville jaguars": "Jaguars",
+      "kansas city chiefs": "Chiefs",
+      "las vegas raiders": "Raiders",
+      "los angeles chargers": "Chargers",
+      "los angeles rams": "Rams",
+      "miami dolphins": "Dolphins",
+      "minnesota vikings": "Vikings",
+      "new england patriots": "Patriots",
+      "new orleans saints": "Saints",
+      "new york giants": "Giants",
+      "new york jets": "Jets",
+      "philadelphia eagles": "Eagles",
+      "pittsburgh steelers": "Steelers",
+      "san francisco 49ers": "49ers",
+      "seattle seahawks": "Seahawks",
+      "tampa bay buccaneers": "Buccaneers",
+      "tennessee titans": "Titans",
+      "washington commanders": "Commanders"
+    };
+
+    function identifyTeam(text) {
+      const normalized = text
+        .toLowerCase()
+        .replace(/[^a-z0-9 ]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+      return Object.entries(teamAliases).find(
+        ([fullName]) => normalized.includes(fullName)
+      )?.[1] || null;
+    }
+
+    $("table").each((_, table) => {
       const heading = $(table)
         .prevAll("h1, h2, h3, h4")
         .first()
         .text()
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9 ]/g, "")
-        .replace(/\s+/g, " ");
+        .trim();
 
-      const teamAliases = {
-        "san francisco 49ers": "49ers",
-        "new england patriots": "Patriots",
-        "new york giants": "Giants",
-        "new york jets": "Jets",
-        "los angeles chargers": "Chargers",
-        "los angeles rams": "Rams",
-        "tampa bay buccaneers": "Buccaneers",
-        "kansas city chiefs": "Chiefs",
-        "green bay packers": "Packers",
-        "new orleans saints": "Saints",
-        "las vegas raiders": "Raiders",
-        "arizona cardinals": "Cardinals",
-        "atlanta falcons": "Falcons",
-        "baltimore ravens": "Ravens",
-        "buffalo bills": "Bills",
-        "carolina panthers": "Panthers",
-        "chicago bears": "Bears",
-        "cincinnati bengals": "Bengals",
-        "cleveland browns": "Browns",
-        "dallas cowboys": "Cowboys",
-        "denver broncos": "Broncos",
-        "detroit lions": "Lions",
-        "houston texans": "Texans",
-        "indianapolis colts": "Colts",
-        "jacksonville jaguars": "Jaguars",
-        "miami dolphins": "Dolphins",
-        "minnesota vikings": "Vikings",
-        "philadelphia eagles": "Eagles",
-        "pittsburgh steelers": "Steelers",
-        "seattle seahawks": "Seahawks",
-        "tennessee titans": "Titans",
-        "washington commanders": "Commanders"
-      };
+      const tableContext = [
+        heading,
+        $(table).prev().text(),
+        $(table).parent().text()
+      ].join(" ");
 
-      const team =
-        NFL_TEAMS.find(
-          name => name.toLowerCase() === heading
-        ) ||
-        teamAliases[heading] ||
-        null;
+      const team = identifyTeam(tableContext);
 
       $(table).find("tr").each((_, row) => {
         const cells = $(row)
@@ -143,7 +155,7 @@ app.get("/injuries/quarterbacks", async (req, res) => {
         }
 
         quarterbacks.push({
-          team: team || null,
+          team,
           player: cells[0],
           position: cells[1],
           injury: cells[2] || null,
@@ -152,6 +164,27 @@ app.get("/injuries/quarterbacks", async (req, res) => {
         });
       });
     });
+
+    qbInjuryCache = {
+      timestamp: Date.now(),
+      players: quarterbacks
+    };
+
+    return res.json({
+      source: "NFL.com",
+      cached: false,
+      count: quarterbacks.length,
+      quarterbacks
+    });
+  } catch (error) {
+    console.error("QB injury endpoint error:", error);
+
+    return res.status(500).json({
+      error: "Failed to process quarterback injury report."
+    });
+  }
+});
+
 
     if (quarterbacks.length === 0) {
       return res.status(502).json({
