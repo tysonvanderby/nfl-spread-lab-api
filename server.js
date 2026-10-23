@@ -144,10 +144,11 @@ function identifyTeam(text) {
         .trim();
 
       const tableContext = [
-        heading,
-        $(table).prev().text(),
-        $(table).parent().text()
-      ].join(" ");
+  heading,
+  $(table).prev().text()
+].join(" ");
+
+const team = identifyTeam(tableContext);
 
       const team = identifyTeam(tableContext);
 
