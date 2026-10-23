@@ -84,9 +84,57 @@ app.get("/injuries/quarterbacks", async (req, res) => {
         .text()
         .trim();
 
-      const team = NFL_TEAMS.find(
-        name => name.toLowerCase() === heading.toLowerCase()
-      );
+      
+      const heading = $(table)
+        .prevAll("h1, h2, h3, h4")
+        .first()
+        .text()
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9 ]/g, "")
+        .replace(/\s+/g, " ");
+
+      const teamAliases = {
+        "san francisco 49ers": "49ers",
+        "new england patriots": "Patriots",
+        "new york giants": "Giants",
+        "new york jets": "Jets",
+        "los angeles chargers": "Chargers",
+        "los angeles rams": "Rams",
+        "tampa bay buccaneers": "Buccaneers",
+        "kansas city chiefs": "Chiefs",
+        "green bay packers": "Packers",
+        "new orleans saints": "Saints",
+        "las vegas raiders": "Raiders",
+        "arizona cardinals": "Cardinals",
+        "atlanta falcons": "Falcons",
+        "baltimore ravens": "Ravens",
+        "buffalo bills": "Bills",
+        "carolina panthers": "Panthers",
+        "chicago bears": "Bears",
+        "cincinnati bengals": "Bengals",
+        "cleveland browns": "Browns",
+        "dallas cowboys": "Cowboys",
+        "denver broncos": "Broncos",
+        "detroit lions": "Lions",
+        "houston texans": "Texans",
+        "indianapolis colts": "Colts",
+        "jacksonville jaguars": "Jaguars",
+        "miami dolphins": "Dolphins",
+        "minnesota vikings": "Vikings",
+        "philadelphia eagles": "Eagles",
+        "pittsburgh steelers": "Steelers",
+        "seattle seahawks": "Seahawks",
+        "tennessee titans": "Titans",
+        "washington commanders": "Commanders"
+      };
+
+      const team =
+        NFL_TEAMS.find(
+          name => name.toLowerCase() === heading
+        ) ||
+        teamAliases[heading] ||
+        null;
 
       $(table).find("tr").each((_, row) => {
         const cells = $(row)
