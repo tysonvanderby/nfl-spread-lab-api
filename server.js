@@ -170,6 +170,35 @@ let qbInjuryCache = {
 
 
 
+app.get("/roster/quarterbacks", async (req, res) => {
+  try {
+    await loadQuarterbackRoster();
+
+    const quarterbacks = [...qbRosterList].sort(
+      (a, b) =>
+        a.team.localeCompare(b.team) ||
+        a.player.localeCompare(b.player)
+    );
+
+    return res.json({
+      source: "nflverse",
+      updatedAt: new Date(qbRosterCache.timestamp).toISOString(),
+      count: quarterbacks.length,
+      teamCount: new Set(
+        quarterbacks.map(qb => qb.team)
+      ).size,
+      quarterbacks
+    });
+  } catch (error) {
+    console.error("QB roster endpoint error:", error.message);
+
+    return res.status(502).json({
+      error: "Could not load the current quarterback roster.",
+      details: error.message
+    });
+  }
+});
+
 app.get("/injuries/quarterbacks", async (req, res) => {
   try {
     // Return the cached report for five minutes.
