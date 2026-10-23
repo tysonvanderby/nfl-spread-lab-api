@@ -191,6 +191,13 @@ app.get("/injuries/quarterbacks", async (req, res) => {
     const html = await response.text();
     const $ = cheerio.load(html);
     const quarterbacks = [];
+    let roster = qbRosterCache.players;
+
+try {
+  roster = await loadQuarterbackRoster();
+} catch (error) {
+  console.error("QB roster refresh failed:", error.message);
+}
 
     const teamAliases = {
       "arizona cardinals": "Cardinals",
@@ -284,14 +291,17 @@ const team = identifyTeam(tableContext);
           return;
         }
 
-        quarterbacks.push({
-          team,
-          player: cells[0],
-          position: cells[1],
-          injury: cells[2] || null,
-          practiceStatus: cells[3] || null,
-          gameStatus: cells[4] || null
-        });
+        const player = cells[0];
+const rosterTeam = roster.get(normalizePlayerName(player));
+
+quarterbacks.push({
+  team: rosterTeam || team,
+  player,
+  position: cells[1],
+  injury: cells[2] || null,
+  practiceStatus: cells[3] || null,
+  gameStatus: cells[4] || null
+});
       });
     });
 
