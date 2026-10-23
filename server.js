@@ -51,7 +51,7 @@ const NFL_TEAM_NAMES = {
   SEA: "Seahawks", TB: "Buccaneers", TEN: "Titans",
   WAS: "Commanders"
 };
-
+let qbRosterList = [];
 let qbRosterCache = {
   timestamp: 0,
   players: new Map()
