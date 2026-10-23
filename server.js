@@ -186,33 +186,6 @@ app.get("/injuries/quarterbacks", async (req, res) => {
 });
 
 
-    if (quarterbacks.length === 0) {
-      return res.status(502).json({
-        error: "No quarterback rows were found in the NFL report.",
-        message: "The report format may have changed; no empty result was cached."
-      });
-    }
-
-    qbInjuryCache = {
-      timestamp: Date.now(),
-      players: quarterbacks
-    };
-
-    return res.json({
-      source: "NFL.com",
-      cached: false,
-      updatedAt: new Date().toISOString(),
-      count: quarterbacks.length,
-      quarterbacks
-    });
-  } catch (error) {
-    return res.status(502).json({
-      error: "Failed to retrieve quarterback injuries.",
-      details: error.message
-    });
-  }
-});
-
 app.get("/health", (req, res) => {
   res.json({ status: "ok" });
 });
