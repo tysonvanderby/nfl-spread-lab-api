@@ -295,60 +295,181 @@ async function loadQuarterbackDepthChart() {
   ) {
     throw new Error(
       "Depth chart CSV is missing required columns."
-    );
+
+
+let qbDepthChartCache = {
+  timestamp: 0,
+  players: []
+};
+
+async function loadQuarterbackRoster() {
+  if (
+    qbRosterCache.players.size > 0 &&
+    Date.now() - qbRosterCache.timestamp < 24 * 60 * 60 * 1000
+  ) {
+    return qbRosterCache.players;
   }
 
-  const rows = lines.slice(1).map(line => {
-    const row = parseCsvLine(line);
-
-    return {
-      updatedAt: row[dtIndex],
-      teamCode: row[teamIndex]?.toUpperCase(),
-      player: row[nameIndex],
-      position: row[positionIndex]?.toUpperCase(),
-      depthRank: Number(row[rankIndex])
-    };
+  const season = new Date().getFullYear();
+  const response = await fetch(NFL_ROSTER_URL(season), {
+    signal: AbortSignal.timeout(20000)
   });
 
-  const latestByTeam = new Map();
+  if (!response.ok) {
+    throw new Error(`NFL roster download failed: ${response.status}`);
+  }
 
-  for (const row of rows) {
-    if (!row.teamCode || !row.updatedAt) continue;
+  const csv = await response.text();
+  const lines = csv.trim().split(/\r?\n/);
+  const headers = parseCsvLine(lines[0]);
+  const nameIndex = headers.indexOf("full_name");
+  const teamIndex = headers.indexOf("team");
+  const positionIndex = headers.indexOf("position");
 
-    const previous = latestByTeam.get(row.teamCode);
+  if (nameIndex < 0 || teamIndex < 0 || positionIndex < 0) {
+    throw new Error("NFL roster CSV is missing required columns.");
+  }
 
-    if (
-      !previous ||
-      row.updatedAt > previous
-    ) {
-      latestByTeam.set(row.teamCode, row.updatedAt);
+  const players = new Map();
+  const rosterList = [];
+
+  for (const line of lines.slice(1)) {
+    const row = parseCsvLine(line);
+    if (row[positionIndex]?.toUpperCase() !== "QB") continue;
+
+    const name = normalizePlayerName(row[nameIndex]);
+    const team = NFL_TEAM_NAMES[row[teamIndex]?.toUpperCase()];
+
+    if (name && team) {
+      players.set(name, team);
+      rosterList.push({
+        player: row[nameIndex],
+        team,
+        position: "QB"
+      });
     }
   }
 
-  const quarterbacks = rows
-    .filter(row =>
-      row.position === "QB" &&
-      Number.isFinite(row.depthRank) &&
-      row.depthRank >= 1 &&
-      row.player &&
-      row.updatedAt === latestByTeam.get(row.teamCode)
-    )
-    .map(row => ({
-      team: NFL_TEAM_NAMES[row.teamCode] || row.teamCode,
-      player: row.player,
-      position: "QB",
-      depthRank: row.depthRank,
-      updatedAt: row.updatedAt
-    }))
+  if (players.size === 0) {
+    throw new Error("NFL roster downloaded but no quarterbacks were found.");
+  }
+
+  qbRosterList = rosterList;
+  qbRosterCache = {
+    timestamp: Date.now(),
+    players
+  };
+
+  return players;
+}
+
+async function loadQuarterbackDepthChart() {
+  if (
+    qbDepthChartCache.players.length > 0 &&
+    Date.now() - qbDepthChartCache.timestamp < 6 * 60 * 60 * 1000
+  ) {
+    return qbDepthChartCache.players;
+  }
+
+  const season = new Date().getFullYear();
+  const response = await fetch(NFL_DEPTH_CHART_URL(season), {
+    signal: AbortSignal.timeout(20000)
+  });
+
+  if (!response.ok) {
+    throw new Error(`NFL depth chart download failed: ${response.status}`);
+  }
+
+  if (!response.body) {
+    throw new Error("Depth chart download has no response body.");
+  }
+
+  const decoder = new TextDecoder();
+  let carry = "";
+  let headers = null;
+  let dtIndex, teamIndex, nameIndex, positionIndex, rankIndex;
+  const latestByTeam = new Map();
+
+  function processLine(rawLine) {
+    const line = rawLine.replace(/\r$/, "");
+    if (!line) return;
+
+    if (!headers) {
+      headers = parseCsvLine(line).map(h => h.replace(/^\uFEFF/, ""));
+      dtIndex = headers.indexOf("dt");
+      teamIndex = headers.indexOf("team");
+      nameIndex = headers.indexOf("player_name");
+      positionIndex = headers.indexOf("pos_abb");
+      rankIndex = headers.indexOf("pos_rank");
+
+      if (
+        dtIndex < 0 ||
+        teamIndex < 0 ||
+        nameIndex < 0 ||
+        positionIndex < 0 ||
+        rankIndex < 0
+      ) {
+        throw new Error("Depth chart CSV is missing required columns.");
+      }
+      return;
+    }
+
+    const row = parseCsvLine(line);
+    const updatedAt = row[dtIndex];
+    const teamCode = row[teamIndex]?.toUpperCase();
+    const player = row[nameIndex];
+    const position = row[positionIndex]?.toUpperCase();
+    const depthRank = Number(row[rankIndex]);
+
+    if (!teamCode || !updatedAt) return;
+
+    let teamData = latestByTeam.get(teamCode);
+
+    if (!teamData || updatedAt > teamData.updatedAt) {
+      teamData = { updatedAt, quarterbacks: [] };
+      latestByTeam.set(teamCode, teamData);
+    } else if (updatedAt < teamData.updatedAt) {
+      return;
+    }
+
+    if (
+      position === "QB" &&
+      Number.isFinite(depthRank) &&
+      depthRank >= 1 &&
+      player
+    ) {
+      teamData.quarterbacks.push({
+        team: NFL_TEAM_NAMES[teamCode] || teamCode,
+        player,
+        position: "QB",
+        depthRank,
+        updatedAt
+      });
+    }
+  }
+
+  for await (const chunk of response.body) {
+    carry += decoder.decode(chunk, { stream: true });
+    const lines = carry.split("\n");
+    carry = lines.pop() || "";
+
+    for (const line of lines) {
+      processLine(line);
+    }
+  }
+
+  carry += decoder.decode();
+  if (carry) processLine(carry);
+
+  const quarterbacks = [...latestByTeam.values()]
+    .flatMap(team => team.quarterbacks)
     .sort((a, b) =>
       a.team.localeCompare(b.team) ||
       a.depthRank - b.depthRank
     );
 
   if (quarterbacks.length === 0) {
-    throw new Error(
-      "No quarterbacks found in the latest depth charts."
-    );
+    throw new Error("No quarterbacks found in the latest depth charts.");
   }
 
   qbDepthChartCache = {
@@ -373,8 +494,7 @@ let qbInjuryCache = {
   players: []
 };
 
-
-
+    
 app.get("/depth-charts/quarterbacks", async (req, res) => {
   try {
     const quarterbacks = await loadQuarterbackDepthChart();
