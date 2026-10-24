@@ -37,6 +37,9 @@ const NFL_INJURY_URL = "https://amp.nfl.com/injuries/";
 const NFL_ROSTER_URL = (season) =>
   `https://github.com/nflverse/nflverse-data/releases/download/rosters/roster_${season}.csv`;
 
+const NFL_DEPTH_CHART_URL = (season) =>
+  `https://github.com/nflverse/nflverse-data/releases/download/depth_charts/depth_charts_${season}.csv`;
+
 const NFL_TEAM_NAMES = {
   ARI: "Cardinals", ATL: "Falcons", BAL: "Ravens",
   BUF: "Bills", CAR: "Panthers", CHI: "Bears",
