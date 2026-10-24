@@ -280,6 +280,34 @@ let qbInjuryCache = {
 
 
 
+app.get("/depth-charts/quarterbacks", async (req, res) => {
+  try {
+    const quarterbacks = await loadQuarterbackDepthChart();
+
+    return res.json({
+      source: "nflverse depth charts",
+      updatedAt: new Date(
+        qbDepthChartCache.timestamp
+      ).toISOString(),
+      count: quarterbacks.length,
+      teamCount: new Set(
+        quarterbacks.map(qb => qb.team)
+      ).size,
+      quarterbacks
+    });
+  } catch (error) {
+    console.error(
+      "QB depth chart endpoint error:",
+      error.message
+    );
+
+    return res.status(502).json({
+      error: "Could not load quarterback depth charts.",
+      details: error.message
+    });
+  }
+});
+
 app.get("/roster/quarterbacks", async (req, res) => {
   try {
     await loadQuarterbackRoster();
