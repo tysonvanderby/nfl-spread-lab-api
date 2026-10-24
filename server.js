@@ -157,6 +157,113 @@ qbRosterCache = {
 }
 
 
+let qbDepthChartCache = {
+  timestamp: 0,
+  players: []
+};
+
+async function loadQuarterbackDepthChart() {
+  if (
+    qbDepthChartCache.players.length > 0 &&
+    Date.now() - qbDepthChartCache.timestamp < 6 * 60 * 60 * 1000
+  ) {
+    return qbDepthChartCache.players;
+  }
+
+  const season = new Date().getFullYear();
+  const response = await fetch(NFL_DEPTH_CHART_URL(season), {
+    signal: AbortSignal.timeout(20000)
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      `NFL depth chart download failed: ${response.status}`
+    );
+  }
+
+  const csv = await response.text();
+  const lines = csv.trim().split(/\r?\n/);
+  const headers = parseCsvLine(lines[0]);
+
+  const dtIndex = headers.indexOf("dt");
+  const teamIndex = headers.indexOf("team");
+  const nameIndex = headers.indexOf("player_name");
+  const positionIndex = headers.indexOf("pos_abb");
+  const rankIndex = headers.indexOf("pos_rank");
+
+  if (
+    dtIndex < 0 ||
+    teamIndex < 0 ||
+    nameIndex < 0 ||
+    positionIndex < 0 ||
+    rankIndex < 0
+  ) {
+    throw new Error(
+      "Depth chart CSV is missing required columns."
+    );
+  }
+
+  const rows = lines.slice(1).map(line => {
+    const row = parseCsvLine(line);
+
+    return {
+      updatedAt: row[dtIndex],
+      teamCode: row[teamIndex]?.toUpperCase(),
+      player: row[nameIndex],
+      position: row[positionIndex]?.toUpperCase(),
+      depthRank: Number(row[rankIndex])
+    };
+  });
+
+  const latestByTeam = new Map();
+
+  for (const row of rows) {
+    if (!row.teamCode || !row.updatedAt) continue;
+
+    const previous = latestByTeam.get(row.teamCode);
+
+    if (
+      !previous ||
+      row.updatedAt > previous
+    ) {
+      latestByTeam.set(row.teamCode, row.updatedAt);
+    }
+  }
+
+  const quarterbacks = rows
+    .filter(row =>
+      row.position === "QB" &&
+      Number.isFinite(row.depthRank) &&
+      row.depthRank >= 1 &&
+      row.player &&
+      row.updatedAt === latestByTeam.get(row.teamCode)
+    )
+    .map(row => ({
+      team: NFL_TEAM_NAMES[row.teamCode] || row.teamCode,
+      player: row.player,
+      position: "QB",
+      depthRank: row.depthRank,
+      updatedAt: row.updatedAt
+    }))
+    .sort((a, b) =>
+      a.team.localeCompare(b.team) ||
+      a.depthRank - b.depthRank
+    );
+
+  if (quarterbacks.length === 0) {
+    throw new Error(
+      "No quarterbacks found in the latest depth charts."
+    );
+  }
+
+  qbDepthChartCache = {
+    timestamp: Date.now(),
+    players: quarterbacks
+  };
+
+  return quarterbacks;
+}
+
 const NFL_TEAMS = [
   "49ers", "Bears", "Bengals", "Bills", "Broncos", "Browns",
   "Buccaneers", "Cardinals", "Chargers", "Chiefs", "Colts",
