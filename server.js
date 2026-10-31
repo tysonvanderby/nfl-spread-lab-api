@@ -95,7 +95,143 @@ function normalizePlayerName(name) {
     .replace(/\s+/g, " ")
     .trim();
 }
+let qbGameStatsCache = new Map();
 
+async function loadQuarterbackGameStats(season) {
+  const cached = qbGameStatsCache.get(season);
+
+  if (cached && Date.now() - cached.timestamp < 6 * 60 * 60 * 1000) {
+    return cached.players;
+  }
+
+  const response = await fetch(NFL_PLAYER_STATS_URL(season), {
+    signal: AbortSignal.timeout(30000)
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      `QB player stats download failed for ${season}: ${response.status}`
+    );
+  }
+
+  const csv = await response.text();
+  const lines = csv.trim().split(/\r?\n/);
+
+  if (lines.length < 2) {
+    throw new Error(`QB player stats file is empty for ${season}.`);
+  }
+
+  const headers = parseCsvLine(lines[0])
+    .map(h => h.replace(/^\uFEFF/, ""));
+
+  const index = name => headers.indexOf(name);
+
+  const required = [
+    "game_id",
+    "player_id",
+    "position",
+    "season",
+    "week",
+    "season_type",
+    "opponent_team",
+    "completions",
+    "attempts",
+    "passing_yards",
+    "passing_tds",
+    "passing_epa",
+    "carries",
+    "rushing_yards",
+    "rushing_tds",
+    "rushing_epa"
+  ];
+
+  const missing = required.filter(name => index(name) < 0);
+
+  if (missing.length) {
+    throw new Error(
+      `QB stats file is missing columns: ${missing.join(", ")}`
+    );
+  }
+
+  const teamIndex = index("team") >= 0
+    ? index("team")
+    : index("recent_team");
+
+  const interceptionIndex = index("passing_interceptions") >= 0
+    ? index("passing_interceptions")
+    : index("interceptions");
+
+  const playerNameIndex = index("player_display_name") >= 0
+    ? index("player_display_name")
+    : index("player_name");
+
+  const number = value => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const players = [];
+
+  for (const line of lines.slice(1)) {
+    const row = parseCsvLine(line);
+
+    if (row[index("position")]?.toUpperCase() !== "QB") continue;
+    if (row[index("season_type")]?.toUpperCase() !== "REG") continue;
+
+    const team = teamIndex >= 0 ? row[teamIndex] : null;
+
+    if (!team || !row[index("game_id")] || !row[index("player_id")]) {
+      continue;
+    }
+
+    players.push({
+      gameId: row[index("game_id")],
+      playerId: row[index("player_id")],
+      player: playerNameIndex >= 0 ? row[playerNameIndex] : null,
+      team,
+      opponent: row[index("opponent_team")],
+      season: number(row[index("season")]),
+      week: number(row[index("week")]),
+
+      completions: number(row[index("completions")]),
+      attempts: number(row[index("attempts")]),
+      passingYards: number(row[index("passing_yards")]),
+      passingTDs: number(row[index("passing_tds")]),
+      interceptions: interceptionIndex >= 0
+        ? number(row[interceptionIndex])
+        : 0,
+      passingEPA: number(row[index("passing_epa")]),
+      passingCPOE: index("passing_cpoe") >= 0
+        ? number(row[index("passing_cpoe")])
+        : null,
+
+      carries: number(row[index("carries")]),
+      rushingYards: number(row[index("rushing_yards")]),
+      rushingTDs: number(row[index("rushing_tds")]),
+      rushingEPA: number(row[index("rushing_epa")]),
+
+      rushingFumbles: index("rushing_fumbles") >= 0
+        ? number(row[index("rushing_fumbles")])
+        : 0,
+      rushingFumblesLost: index("rushing_fumbles_lost") >= 0
+        ? number(row[index("rushing_fumbles_lost")])
+        : 0
+    });
+  }
+
+  players.sort((a, b) =>
+    a.week - b.week ||
+    a.team.localeCompare(b.team) ||
+    a.player.localeCompare(b.player)
+  );
+
+  qbGameStatsCache.set(season, {
+    timestamp: Date.now(),
+    players
+  });
+
+  return players;
+}
 async function loadQuarterbackRoster() {
   if (
     qbRosterCache.players.size > 0 &&
