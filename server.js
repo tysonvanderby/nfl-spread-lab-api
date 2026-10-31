@@ -335,6 +335,66 @@ app.get("/depth-charts/quarterbacks", async (req, res) => {
     });
   }
 });
+app.get("/depth-charts/quarterbacks/history", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      WITH ranked AS (
+        SELECT
+          team,
+          player,
+          chart_updated_at,
+          ROW_NUMBER() OVER (
+            PARTITION BY team
+            ORDER BY chart_updated_at DESC, captured_at DESC
+          ) AS snapshot_rank
+        FROM qb_depth_chart_history
+        WHERE depth_rank = 1
+      )
+      SELECT team, player, chart_updated_at, snapshot_rank
+      FROM ranked
+      WHERE snapshot_rank <= 2
+      ORDER BY team, snapshot_rank;
+    `);
+
+    const teams = new Map();
+
+    for (const row of result.rows) {
+      if (!teams.has(row.team)) {
+        teams.set(row.team, []);
+      }
+      teams.get(row.team).push(row);
+    }
+
+    const history = [...teams.entries()].map(([team, entries]) => {
+      const current = entries.find(row => row.snapshot_rank === "1" || row.snapshot_rank === 1);
+      const previous = entries.find(row => row.snapshot_rank === "2" || row.snapshot_rank === 2);
+
+      return {
+        team,
+        currentQB1: current?.player || null,
+        previousQB1: previous?.player || null,
+        changed: previous
+          ? current?.player !== previous.player
+          : false,
+        currentChartDate: current?.chart_updated_at || null,
+        previousChartDate: previous?.chart_updated_at || null
+      };
+    });
+
+    return res.json({
+      source: "PostgreSQL QB depth chart history",
+      count: history.length,
+      history
+    });
+  } catch (error) {
+    console.error("QB history endpoint error:", error.message);
+
+    return res.status(500).json({
+      error: "Could not load QB depth chart history.",
+      details: error.message
+    });
+  }
+});
 
 app.get("/roster/quarterbacks", async (req, res) => {
   try {
