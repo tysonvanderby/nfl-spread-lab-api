@@ -1060,6 +1060,19 @@ app.get("/best-bets/stats", async (req, res) => {
 
 async function startServer() {
   try {
+       await pool.query(`
+      CREATE TABLE IF NOT EXISTS qb_depth_chart_history (
+        id BIGSERIAL PRIMARY KEY,
+        team TEXT NOT NULL,
+        player TEXT NOT NULL,
+        depth_rank INTEGER NOT NULL,
+        chart_updated_at TEXT NOT NULL,
+        captured_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (team, chart_updated_at, depth_rank)
+      );
+    `);
+
+    console.log("QB depth chart history table ready.");
     await pool.query(`
       CREATE TABLE IF NOT EXISTS best_bets (
         id BIGSERIAL PRIMARY KEY,
