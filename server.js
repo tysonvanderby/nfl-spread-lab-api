@@ -39,7 +39,8 @@ const NFL_ROSTER_URL = (season) =>
 
 const NFL_DEPTH_CHART_URL = (season) =>
   `https://github.com/nflverse/nflverse-data/releases/download/depth_charts/depth_charts_${season}.csv`;
-
+const NFL_PLAYER_STATS_URL = (season) =>
+  `https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_${season}.csv`;
 const NFL_TEAM_NAMES = {
   ARI: "Cardinals", ATL: "Falcons", BAL: "Ravens",
   BUF: "Bills", CAR: "Panthers", CHI: "Bears",
