@@ -274,7 +274,17 @@ async function loadQuarterbackDepthChart() {
   if (quarterbacks.length === 0) {
     throw new Error("No quarterbacks found in the latest depth charts.");
   }
-
+  for (const qb of quarterbacks) {
+    await pool.query(
+      `INSERT INTO qb_depth_chart_history
+        (team, player, depth_rank, chart_updated_at)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (team, chart_updated_at, depth_rank)
+       DO NOTHING`,
+      [qb.team, qb.player, qb.depthRank, qb.updatedAt]
+    );
+  }
+  
   qbDepthChartCache = {
     timestamp: Date.now(),
     players: quarterbacks
