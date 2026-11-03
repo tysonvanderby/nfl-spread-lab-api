@@ -474,7 +474,7 @@ const awayRecent = awayQb
         plays: qb.plays
       });
 
-      teamHistory.set(team, history);
+      teamHistory.set(qb.playerId, history);
     }
   }
 
