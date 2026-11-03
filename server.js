@@ -346,6 +346,137 @@ async function loadHistoricalQuarterbackStats(
   return allPlayers;
 }
 
+async function buildHistoricalQbGameMetrics(
+  startSeason = 2015
+) {
+  const [games, players] = await Promise.all([
+    loadHistoricalGameResults(),
+    loadHistoricalQuarterbackStats(startSeason)
+  ]);
+
+  // Group QB performances by game and team.
+  const qbByGameTeam = new Map();
+
+  for (const player of players) {
+    const key = `${player.gameId}_${player.team}`;
+    const plays =
+      player.attempts +
+      player.sacksSuffered +
+      player.carries;
+
+    if (!qbByGameTeam.has(key)) {
+      qbByGameTeam.set(key, []);
+    }
+
+    qbByGameTeam.get(key).push({
+      player: player.player,
+      plays,
+      epa:
+        player.passingEPA +
+        player.rushingEPA
+    });
+  }
+
+  // Select the primary QB by total QB plays.
+  const primaryQb = new Map();
+
+  for (const [key, quarterbacks] of qbByGameTeam) {
+    const starter = quarterbacks
+      .sort((a, b) => b.plays - a.plays)[0];
+
+    if (starter && starter.plays > 0) {
+      primaryQb.set(key, starter);
+    }
+  }
+
+  const teamHistory = new Map();
+
+  function previousFiveEpa(team) {
+    const history = teamHistory.get(team) || [];
+
+    const recent = history.slice(-5);
+
+    const totalEpa = recent.reduce(
+      (sum, game) => sum + game.epa,
+      0
+    );
+
+    const totalPlays = recent.reduce(
+      (sum, game) => sum + game.plays,
+      0
+    );
+
+    return {
+      games: recent.length,
+      epaPerPlay:
+        totalPlays > 0 ? totalEpa / totalPlays : null
+    };
+  }
+
+  const results = [];
+
+  games.sort((a, b) =>
+    a.date.localeCompare(b.date)
+  );
+
+  for (const game of games) {
+    const homeQb = primaryQb.get(
+      `${game.gameId}_${game.home}`
+    );
+
+    const awayQb = primaryQb.get(
+      `${game.gameId}_${game.away}`
+    );
+
+    // Only use QB performance from games before this game.
+    const homeRecent = previousFiveEpa(game.home);
+    const awayRecent = previousFiveEpa(game.away);
+
+    if (
+      homeQb &&
+      awayQb &&
+      homeRecent.games === 5 &&
+      awayRecent.games === 5
+    ) {
+      results.push({
+        gameId: game.gameId,
+        date: game.date,
+        season: Number(game.date.slice(0, 4)) -
+          (Number(game.date.slice(5, 7)) < 7 ? 1 : 0),
+        home: game.home,
+        away: game.away,
+        actualMargin: game.homeScore - game.awayScore,
+        homeQb: homeQb.player,
+        awayQb: awayQb.player,
+        homeEpaPerPlay: homeRecent.epaPerPlay,
+        awayEpaPerPlay: awayRecent.epaPerPlay,
+        epaDifference:
+          homeRecent.epaPerPlay -
+          awayRecent.epaPerPlay
+      });
+    }
+
+    // Add this game's QB performance only after creating its feature.
+    for (const [team, qb] of [
+      [game.home, homeQb],
+      [game.away, awayQb]
+    ]) {
+      if (!qb) continue;
+
+      const history = teamHistory.get(team) || [];
+
+      history.push({
+        epa: qb.epa,
+        plays: qb.plays
+      });
+
+      teamHistory.set(team, history);
+    }
+  }
+
+  return results;
+}
+
 app.get("/qb-performance/history", async (req, res) => {
   try {
     const season = Number(req.query.season) ||
