@@ -328,6 +328,9 @@ const epaPerPlay =
               total("passingTDs") + total("rushingTDs"),
             passingEPA: Number(total("passingEPA").toFixed(2)),
             rushingEPA: Number(total("rushingEPA").toFixed(2))
+            totalEPA: Number(totalEpa.toFixed(2)),
+totalPlays,
+epaPerPlay: Number(epaPerPlay.toFixed(3))
           },
           games
         };
