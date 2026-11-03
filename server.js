@@ -481,6 +481,37 @@ const awayRecent = awayQb
   return results;
 }
 
+app.get("/qb-performance/calibration-data", async (req, res) => {
+  try {
+    const startSeason = Number(req.query.startSeason) || 2015;
+
+    const results =
+      await buildHistoricalQbGameMetrics(startSeason);
+
+    res.json({
+      startSeason,
+      gamesTested: results.length,
+      sample: results.slice(-10),
+      averageEpaDifference:
+        results.length > 0
+          ? Number((
+              results.reduce(
+                (sum, game) => sum + game.epaDifference,
+                0
+              ) / results.length
+            ).toFixed(4))
+          : null
+    });
+  } catch (error) {
+    console.error("QB calibration data error:", error);
+
+    res.status(500).json({
+      error: "Unable to build historical QB calibration data.",
+      details: error.message
+    });
+  }
+});
+
 app.get("/qb-performance/history", async (req, res) => {
   try {
     const season = Number(req.query.season) ||
