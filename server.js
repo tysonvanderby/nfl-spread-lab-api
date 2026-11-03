@@ -512,6 +512,187 @@ app.get("/qb-performance/calibration-data", async (req, res) => {
   }
 });
 
+
+app.get("/qb-performance/calibration", async (req, res) => {
+  try {
+    const startSeason = Number(req.query.startSeason) || 2015;
+    const minimumTrainingGames = 200;
+
+    const games =
+      await buildHistoricalQbGameMetrics(startSeason);
+
+    games.sort((a, b) =>
+      a.date.localeCompare(b.date)
+    );
+
+    let count = 0;
+    let sumX = 0;
+    let sumY = 0;
+    let sumXX = 0;
+    let sumXY = 0;
+
+    let baselineAbsoluteError = 0;
+    let baselineSquaredError = 0;
+    let qbAbsoluteError = 0;
+    let qbSquaredError = 0;
+
+    let coefficientTotal = 0;
+    let testedGames = 0;
+    const predictions = [];
+
+    for (const game of games) {
+      if (count >= minimumTrainingGames) {
+        const meanX = sumX / count;
+        const meanY = sumY / count;
+
+        const denominator =
+          sumXX - (sumX * sumX) / count;
+
+        const coefficient =
+          denominator !== 0
+            ? (
+                sumXY - (sumX * sumY) / count
+              ) / denominator
+            : 0;
+
+        const intercept =
+          meanY - coefficient * meanX;
+
+        const baselinePrediction = meanY;
+
+        const qbPrediction =
+          intercept +
+          coefficient * game.epaDifference;
+
+        const baselineError =
+          game.actualMargin - baselinePrediction;
+
+        const qbError =
+          game.actualMargin - qbPrediction;
+
+        baselineAbsoluteError += Math.abs(baselineError);
+        baselineSquaredError += baselineError ** 2;
+
+        qbAbsoluteError += Math.abs(qbError);
+        qbSquaredError += qbError ** 2;
+
+        coefficientTotal += coefficient;
+        testedGames++;
+
+        predictions.push({
+          date: game.date,
+          home: game.home,
+          away: game.away,
+          actualMargin: game.actualMargin,
+          epaDifference: Number(
+            game.epaDifference.toFixed(4)
+          ),
+          baselinePrediction: Number(
+            baselinePrediction.toFixed(2)
+          ),
+          qbPrediction: Number(
+            qbPrediction.toFixed(2)
+          ),
+          coefficient: Number(
+            coefficient.toFixed(2)
+          )
+        });
+      }
+
+      // Add this game to the training data only
+      // after its prediction has been calculated.
+      const x = game.epaDifference;
+      const y = game.actualMargin;
+
+      count++;
+      sumX += x;
+      sumY += y;
+      sumXX += x * x;
+      sumXY += x * y;
+    }
+
+    const baselineMae =
+      testedGames > 0
+        ? baselineAbsoluteError / testedGames
+        : null;
+
+    const qbMae =
+      testedGames > 0
+        ? qbAbsoluteError / testedGames
+        : null;
+
+    const baselineRmse =
+      testedGames > 0
+        ? Math.sqrt(baselineSquaredError / testedGames)
+        : null;
+
+    const qbRmse =
+      testedGames > 0
+        ? Math.sqrt(qbSquaredError / testedGames)
+        : null;
+
+    res.json({
+      startSeason,
+      totalGamesAvailable: games.length,
+      minimumTrainingGames,
+      trainingGamesUsed: count,
+      testedGames,
+
+      baseline: {
+        mae: baselineMae !== null
+          ? Number(baselineMae.toFixed(3))
+          : null,
+        rmse: baselineRmse !== null
+          ? Number(baselineRmse.toFixed(3))
+          : null
+      },
+
+      qbAdjusted: {
+        mae: qbMae !== null
+          ? Number(qbMae.toFixed(3))
+          : null,
+        rmse: qbRmse !== null
+          ? Number(qbRmse.toFixed(3))
+          : null,
+        averageCoefficient: testedGames > 0
+          ? Number(
+              (coefficientTotal / testedGames).toFixed(3)
+            )
+          : null
+      },
+
+      improvement: {
+        mae: baselineMae !== null && baselineMae > 0
+          ? Number(
+              (
+                (baselineMae - qbMae) /
+                baselineMae * 100
+              ).toFixed(2)
+            )
+          : null,
+        rmse: baselineRmse !== null && baselineRmse > 0
+          ? Number(
+              (
+                (baselineRmse - qbRmse) /
+                baselineRmse * 100
+              ).toFixed(2)
+            )
+          : null
+      },
+
+      recentPredictions: predictions.slice(-10)
+    });
+  } catch (error) {
+    console.error("QB calibration error:", error);
+
+    res.status(500).json({
+      error: "Unable to run QB calibration.",
+      details: error.message
+    });
+  }
+});
+
+
 app.get("/qb-performance/history", async (req, res) => {
   try {
     const season = Number(req.query.season) ||
