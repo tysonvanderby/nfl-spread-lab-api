@@ -160,7 +160,11 @@ async function loadQuarterbackGameStats(season) {
   const interceptionIndex = index("passing_interceptions") >= 0
     ? index("passing_interceptions")
     : index("interceptions");
-
+  
+ const sacksIndex = index("sacks_suffered") >= 0
+  ? index("sacks_suffered")
+  : index("sacks");
+  
   const playerNameIndex = index("player_display_name") >= 0
     ? index("player_display_name")
     : index("player_name");
