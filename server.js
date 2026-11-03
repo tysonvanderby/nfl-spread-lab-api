@@ -298,6 +298,17 @@ app.get("/qb-performance/history", async (req, res) => {
         const total = key =>
           games.reduce((sum, game) => sum + game[key], 0);
 
+        const totalEpa =
+  total("passingEPA") + total("rushingEPA");
+
+const totalPlays =
+  total("attempts") +
+  total("sacksSuffered") +
+  total("carries");
+
+const epaPerPlay =
+  totalPlays > 0 ? totalEpa / totalPlays : 0;
+
         return {
           playerId: qb.playerId,
           player: qb.player,
