@@ -369,12 +369,13 @@ async function buildHistoricalQbGameMetrics(
     }
 
     qbByGameTeam.get(key).push({
-      player: player.player,
-      plays,
-      epa:
-        player.passingEPA +
-        player.rushingEPA
-    });
+  playerId: player.playerId,
+  player: player.player,
+  plays,
+  epa:
+    player.passingEPA +
+    player.rushingEPA
+});
   }
 
   // Select the primary QB by total QB plays.
