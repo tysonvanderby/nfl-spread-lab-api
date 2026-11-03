@@ -274,6 +274,7 @@ app.get("/qb-performance/history", async (req, res) => {
         opponent: game.opponent,
         completions: game.completions,
         attempts: game.attempts,
+        sacksSuffered: game.sacksSuffered,
         passingYards: game.passingYards,
         passingTDs: game.passingTDs,
         interceptions: game.interceptions,
