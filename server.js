@@ -792,6 +792,126 @@ app.get("/qb-performance/elo-calibration", async (req, res) => {
         actualMargin > 0 ? 1 :
         actualMargin < 0 ? 0 : 0.5;
 
+app.get("/qb-performance/elo-calibration", async (req, res) => {
+  try {
+    const startSeason = Number(req.query.startSeason) || 2015;
+    const minimumTrainingGames = 200;
+
+    const K = 20;
+    const HOME_ADVANTAGE = 55;
+    const ELO_PER_POINT = 25;
+
+    // Load every completed regular-season game,
+    // not just games with usable QB metrics.
+    const [allGames, qbGames] = await Promise.all([
+      loadHistoricalGameResults(),
+      buildHistoricalQbGameMetrics(startSeason)
+    ]);
+
+    const eligibleByGameId = new Map(
+      qbGames.map(game => [game.gameId, game])
+    );
+
+    const games = allGames
+      .filter(game =>
+        Number(game.date.slice(0, 4)) >= startSeason
+      )
+      .sort((a, b) =>
+        a.date.localeCompare(b.date)
+      );
+
+    const ratings = new Map();
+
+    let trainingCount = 0;
+    let sumXX = 0;
+    let sumXY = 0;
+
+    let eloAbsoluteError = 0;
+    let eloSquaredError = 0;
+    let qbAbsoluteError = 0;
+    let qbSquaredError = 0;
+
+    let coefficientTotal = 0;
+    let testedGames = 0;
+    let eligibleGames = 0;
+
+    const predictions = [];
+
+    for (const game of games) {
+      const homeRating = ratings.get(game.home) ?? 1500;
+      const awayRating = ratings.get(game.away) ?? 1500;
+
+      const ratingDifference =
+        homeRating - awayRating + HOME_ADVANTAGE;
+
+      const expectedHomeWin =
+        1 / (1 + Math.pow(10, -ratingDifference / 400));
+
+      const eloPrediction =
+        ratingDifference / ELO_PER_POINT;
+
+      const actualMargin =
+        game.homeScore - game.awayScore;
+
+      const qbGame = eligibleByGameId.get(game.gameId);
+
+      // Only evaluate QB adjustments when both teams
+      // have five previous games of QB performance.
+      if (qbGame) {
+        eligibleGames++;
+
+        if (trainingCount >= minimumTrainingGames) {
+          const coefficient =
+            sumXX > 0 ? sumXY / sumXX : 0;
+
+          const qbAdjustment =
+            coefficient * qbGame.epaDifference;
+
+          const qbPrediction =
+            eloPrediction + qbAdjustment;
+
+          const eloError =
+            actualMargin - eloPrediction;
+
+          const qbError =
+            actualMargin - qbPrediction;
+
+          eloAbsoluteError += Math.abs(eloError);
+          eloSquaredError += eloError ** 2;
+
+          qbAbsoluteError += Math.abs(qbError);
+          qbSquaredError += qbError ** 2;
+
+          coefficientTotal += coefficient;
+          testedGames++;
+
+          predictions.push({
+            date: game.date,
+            home: game.home,
+            away: game.away,
+            actualMargin,
+            eloPrediction: Number(eloPrediction.toFixed(2)),
+            qbAdjustment: Number(qbAdjustment.toFixed(2)),
+            qbPrediction: Number(qbPrediction.toFixed(2)),
+            coefficient: Number(coefficient.toFixed(2))
+          });
+        }
+
+        // Train only after this game's prediction.
+        const x = qbGame.epaDifference;
+        const residual = actualMargin - eloPrediction;
+
+        sumXX += x * x;
+        sumXY += x * residual;
+        trainingCount++;
+      }
+
+      // Crucially, update Elo after EVERY completed game,
+      // including games without eligible QB metrics.
+      const actualHomeResult =
+        actualMargin > 0 ? 1 :
+        actualMargin < 0 ? 0 : 0.5;
+
       const change =
         K * (actualHomeResult - expectedHomeWin);
 
@@ -818,6 +938,7 @@ app.get("/qb-performance/elo-calibration", async (req, res) => {
     res.json({
       startSeason,
       totalGamesAvailable: games.length,
+      eligibleQbGames: eligibleGames,
       minimumTrainingGames,
       trainingGamesUsed: trainingCount,
       testedGames,
