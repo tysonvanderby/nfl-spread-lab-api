@@ -463,13 +463,11 @@ const awayRecent = awayQb
     }
 
     // Add this game's QB performance only after creating its feature.
-    for (const [team, qb] of [
-      [game.home, homeQb],
-      [game.away, awayQb]
-    ]) {
-      if (!qb) continue;
+    for (const qb of [homeQb, awayQb]) {
+  if (!qb) continue;
 
-      const history = teamHistory.get(team) || [];
+  const history =
+    teamHistory.get(qb.playerId) || [];
 
       history.push({
         epa: qb.epa,
