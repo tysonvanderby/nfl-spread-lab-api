@@ -324,6 +324,28 @@ async function loadQuarterbackGameStats(season) {
   return players;
 }
 
+async function loadHistoricalQuarterbackStats(
+  startSeason = 2015
+) {
+  const endSeason = new Date().getFullYear();
+  const allPlayers = [];
+
+  for (
+    let season = startSeason;
+    season <= endSeason;
+    season++
+  ) {
+    console.log(`Loading historical QB stats: ${season}`);
+
+    const players =
+      await loadQuarterbackGameStats(season);
+
+    allPlayers.push(...players);
+  }
+
+  return allPlayers;
+}
+
 app.get("/qb-performance/history", async (req, res) => {
   try {
     const season = Number(req.query.season) ||
