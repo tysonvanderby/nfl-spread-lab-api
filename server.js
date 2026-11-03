@@ -199,6 +199,9 @@ async function loadQuarterbackGameStats(season) {
 
       completions: number(row[index("completions")]),
       attempts: number(row[index("attempts")]),
+      sacksSuffered: sacksIndex >= 0
+  ? number(row[sacksIndex])
+  : 0,
       passingYards: number(row[index("passing_yards")]),
       passingTDs: number(row[index("passing_tds")]),
       interceptions: interceptionIndex >= 0
