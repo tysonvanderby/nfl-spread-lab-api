@@ -693,6 +693,183 @@ app.get("/qb-performance/calibration", async (req, res) => {
 });
 
 
+app.get("/qb-performance/elo-calibration", async (req, res) => {
+  try {
+    const startSeason = Number(req.query.startSeason) || 2015;
+    const minimumTrainingGames = 200;
+
+    const K = 20;
+    const HOME_ADVANTAGE = 55;
+    const ELO_PER_POINT = 25;
+
+    const games =
+      await buildHistoricalQbGameMetrics(startSeason);
+
+    games.sort((a, b) =>
+      a.date.localeCompare(b.date)
+    );
+
+    const ratings = new Map();
+
+    let trainingCount = 0;
+    let sumXX = 0;
+    let sumXY = 0;
+
+    let eloAbsoluteError = 0;
+    let eloSquaredError = 0;
+    let qbAbsoluteError = 0;
+    let qbSquaredError = 0;
+
+    let coefficientTotal = 0;
+    let testedGames = 0;
+    const predictions = [];
+
+    for (const game of games) {
+      const homeRating = ratings.get(game.home) ?? 1500;
+      const awayRating = ratings.get(game.away) ?? 1500;
+
+      const ratingDifference =
+        homeRating - awayRating + HOME_ADVANTAGE;
+
+      const expectedHomeWin =
+        1 / (1 + Math.pow(10, -ratingDifference / 400));
+
+      const eloPrediction =
+        ratingDifference / ELO_PER_POINT;
+
+      const actualMargin = game.actualMargin;
+
+      if (trainingCount >= minimumTrainingGames) {
+        const coefficient =
+          sumXX > 0 ? sumXY / sumXX : 0;
+
+        const qbAdjustment =
+          coefficient * game.epaDifference;
+
+        const qbPrediction =
+          eloPrediction + qbAdjustment;
+
+        const eloError =
+          actualMargin - eloPrediction;
+
+        const qbError =
+          actualMargin - qbPrediction;
+
+        eloAbsoluteError += Math.abs(eloError);
+        eloSquaredError += eloError ** 2;
+
+        qbAbsoluteError += Math.abs(qbError);
+        qbSquaredError += qbError ** 2;
+
+        coefficientTotal += coefficient;
+        testedGames++;
+
+        predictions.push({
+          date: game.date,
+          home: game.home,
+          away: game.away,
+          actualMargin,
+          eloPrediction: Number(eloPrediction.toFixed(2)),
+          qbAdjustment: Number(qbAdjustment.toFixed(2)),
+          qbPrediction: Number(qbPrediction.toFixed(2)),
+          coefficient: Number(coefficient.toFixed(2))
+        });
+      }
+
+      // Train only on games already completed.
+      if (game.epaDifference !== null &&
+          Number.isFinite(game.epaDifference)) {
+        const residual = actualMargin - eloPrediction;
+        const x = game.epaDifference;
+
+        sumXX += x * x;
+        sumXY += x * residual;
+        trainingCount++;
+      }
+
+      // Update Elo only after the prediction.
+      const actualHomeResult =
+        actualMargin > 0 ? 1 :
+        actualMargin < 0 ? 0 : 0.5;
+
+      const change =
+        K * (actualHomeResult - expectedHomeWin);
+
+      ratings.set(game.home, homeRating + change);
+      ratings.set(game.away, awayRating - change);
+    }
+
+    const eloMae = testedGames > 0
+      ? eloAbsoluteError / testedGames
+      : null;
+
+    const qbMae = testedGames > 0
+      ? qbAbsoluteError / testedGames
+      : null;
+
+    const eloRmse = testedGames > 0
+      ? Math.sqrt(eloSquaredError / testedGames)
+      : null;
+
+    const qbRmse = testedGames > 0
+      ? Math.sqrt(qbSquaredError / testedGames)
+      : null;
+
+    res.json({
+      startSeason,
+      totalGamesAvailable: games.length,
+      minimumTrainingGames,
+      trainingGamesUsed: trainingCount,
+      testedGames,
+
+      elo: {
+        mae: eloMae !== null
+          ? Number(eloMae.toFixed(3))
+          : null,
+        rmse: eloRmse !== null
+          ? Number(eloRmse.toFixed(3))
+          : null
+      },
+
+      eloPlusQb: {
+        mae: qbMae !== null
+          ? Number(qbMae.toFixed(3))
+          : null,
+        rmse: qbRmse !== null
+          ? Number(qbRmse.toFixed(3))
+          : null,
+        averageCoefficient: testedGames > 0
+          ? Number(
+              (coefficientTotal / testedGames).toFixed(3)
+            )
+          : null
+      },
+
+      improvement: {
+        mae: eloMae !== null && eloMae > 0
+          ? Number(
+              ((eloMae - qbMae) / eloMae * 100).toFixed(2)
+            )
+          : null,
+        rmse: eloRmse !== null && eloRmse > 0
+          ? Number(
+              ((eloRmse - qbRmse) / eloRmse * 100).toFixed(2)
+            )
+          : null
+      },
+
+      recentPredictions: predictions.slice(-10)
+    });
+  } catch (error) {
+    console.error("Elo QB calibration error:", error);
+
+    res.status(500).json({
+      error: "Unable to run Elo QB calibration.",
+      details: error.message
+    });
+  }
+});
+
 app.get("/qb-performance/history", async (req, res) => {
   try {
     const season = Number(req.query.season) ||
