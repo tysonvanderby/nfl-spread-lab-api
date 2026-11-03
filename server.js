@@ -95,6 +95,90 @@ function normalizePlayerName(name) {
     .replace(/\s+/g, " ")
     .trim();
 }
+const NFL_GAMES_URL =
+  "https://raw.githubusercontent.com/nflverse/nfldata/master/data/games.csv";
+
+let historicalGamesCache = {
+  timestamp: 0,
+  games: []
+};
+
+async function loadHistoricalGameResults() {
+  if (
+    historicalGamesCache.games.length > 0 &&
+    Date.now() - historicalGamesCache.timestamp < 86400000
+  ) {
+    return historicalGamesCache.games;
+  }
+
+  const response = await fetch(NFL_GAMES_URL, {
+    signal: AbortSignal.timeout(30000)
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      `Historical games download failed: ${response.status}`
+    );
+  }
+
+  const csv = await response.text();
+  const lines = csv.trim().split(/\r?\n/);
+  const headers = parseCsvLine(lines[0])
+    .map(h => h.replace(/^\uFEFF/, ""));
+
+  const index = name => headers.indexOf(name);
+
+  const required = [
+    "game_id",
+    "gameday",
+    "game_type",
+    "home_team",
+    "away_team",
+    "home_score",
+    "away_score"
+  ];
+
+  const missing = required.filter(name => index(name) < 0);
+
+  if (missing.length) {
+    throw new Error(
+      `Historical games file missing columns: ${missing.join(", ")}`
+    );
+  }
+
+  const games = [];
+
+  for (const line of lines.slice(1)) {
+    const row = parseCsvLine(line);
+
+    if (row[index("game_type")] !== "REG") continue;
+
+    const homeScore = Number(row[index("home_score")]);
+    const awayScore = Number(row[index("away_score")]);
+
+    if (
+      !Number.isFinite(homeScore) ||
+      !Number.isFinite(awayScore)
+    ) continue;
+
+    games.push({
+      gameId: row[index("game_id")],
+      date: row[index("gameday")],
+      home: row[index("home_team")],
+      away: row[index("away_team")],
+      homeScore,
+      awayScore
+    });
+  }
+
+  historicalGamesCache = {
+    timestamp: Date.now(),
+    games
+  };
+
+  return games;
+}
+
 let qbGameStatsCache = new Map();
 
 async function loadQuarterbackGameStats(season) {
