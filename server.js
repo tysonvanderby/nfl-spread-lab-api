@@ -233,6 +233,106 @@ async function loadQuarterbackGameStats(season) {
   return players;
 }
 
+app.get("/qb-performance/history", async (req, res) => {
+  try {
+    const season = Number(req.query.season) ||
+      new Date().getFullYear();
+
+    if (!Number.isInteger(season) || season < 1999 || season > new Date().getFullYear()) {
+      return res.status(400).json({
+        error: "Invalid season."
+      });
+    }
+
+    const players = await loadQuarterbackGameStats(season);
+
+    const grouped = new Map();
+
+    for (const game of players) {
+      if (!game.playerId || !game.player) continue;
+
+      if (!grouped.has(game.playerId)) {
+        grouped.set(game.playerId, {
+          playerId: game.playerId,
+          player: game.player,
+          team: game.team,
+          games: []
+        });
+      }
+
+      grouped.get(game.playerId).games.push({
+        gameId: game.gameId,
+        season: game.season,
+        week: game.week,
+        opponent: game.opponent,
+        completions: game.completions,
+        attempts: game.attempts,
+        passingYards: game.passingYards,
+        passingTDs: game.passingTDs,
+        interceptions: game.interceptions,
+        passingEPA: game.passingEPA,
+        passingCPOE: game.passingCPOE,
+        carries: game.carries,
+        rushingYards: game.rushingYards,
+        rushingTDs: game.rushingTDs,
+        rushingEPA: game.rushingEPA,
+        rushingFumbles: game.rushingFumbles,
+        rushingFumblesLost: game.rushingFumblesLost
+      });
+    }
+
+    const quarterbacks = [...grouped.values()]
+      .map(qb => {
+        const games = qb.games
+          .sort((a, b) => b.week - a.week)
+          .slice(0, 5);
+
+        const total = key =>
+          games.reduce((sum, game) => sum + game[key], 0);
+
+        return {
+          playerId: qb.playerId,
+          player: qb.player,
+          team: qb.team,
+          gamesPlayed: games.length,
+          lastFive: {
+            passingYards: total("passingYards"),
+            passingTDs: total("passingTDs"),
+            interceptions: total("interceptions"),
+            completions: total("completions"),
+            attempts: total("attempts"),
+            rushingYards: total("rushingYards"),
+            rushingTDs: total("rushingTDs"),
+            totalYards:
+              total("passingYards") + total("rushingYards"),
+            totalTDs:
+              total("passingTDs") + total("rushingTDs"),
+            passingEPA: Number(total("passingEPA").toFixed(2)),
+            rushingEPA: Number(total("rushingEPA").toFixed(2))
+          },
+          games
+        };
+      })
+      .sort((a, b) => a.player.localeCompare(b.player));
+
+    return res.json({
+      source: "nflverse weekly player statistics",
+      season,
+      gamesLimit: 5,
+      quarterbackCount: quarterbacks.length,
+      quarterbacks
+    });
+
+  } catch (error) {
+    console.error("QB performance history error:", error);
+
+    return res.status(502).json({
+      error: "Could not load quarterback performance history.",
+      details: error.message
+    });
+  }
+});
+
 async function loadQuarterbackRoster() {
   if (
     qbRosterCache.players.size > 0 &&
