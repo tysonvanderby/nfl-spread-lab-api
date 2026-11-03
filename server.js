@@ -430,8 +430,13 @@ async function buildHistoricalQbGameMetrics(
     );
 
     // Only use QB performance from games before this game.
-    const homeRecent = previousFiveEpa(game.home);
-    const awayRecent = previousFiveEpa(game.away);
+    const homeRecent = homeQb
+  ? previousFiveEpa(homeQb.playerId)
+  : { games: 0, epaPerPlay: null };
+
+const awayRecent = awayQb
+  ? previousFiveEpa(awayQb.playerId)
+  : { games: 0, epaPerPlay: null };
 
     if (
       homeQb &&
