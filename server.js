@@ -392,9 +392,9 @@ async function buildHistoricalQbGameMetrics(
 
   const teamHistory = new Map();
 
-  function previousFiveEpa(team) {
-    const history = teamHistory.get(team) || [];
-
+  function previousFiveEpa(playerId) {
+  const history = teamHistory.get(playerId) || [];
+    
     const recent = history.slice(-5);
 
     const totalEpa = recent.reduce(
